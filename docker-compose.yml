@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # PostgreSQL com PostGIS para consultas geoespaciais
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: geolocation-postgres
+    environment:
+      POSTGRES_DB: geolocation_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deployments/sql:/docker-entrypoint-initdb.d
+    networks:
+      - geolocation-network
+
+  # Redis para cache e streams de eventos
+  redis:
+    image: redis:7-alpine
+    container_name: geolocation-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - geolocation-network
+
+  # Nossa aplicação Go
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geolocation-app
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=geolocation_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - geolocation-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  geolocation-network:
+    driver: bridge
