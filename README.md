@@ -1,47 +1,93 @@
-# Sistema de Geolocalização para Eventos
+# Geolocation Tracker
 
-Compartilha localização entre pessoas em eventos. Você vê os amigos, eles te veem, tudo em tempo real.
+Sistema de geolocalização em tempo real para eventos. Permite que usuários compartilhem suas posições, encontrem amigos próximos e recebam notificações automáticas via Redis Streams.
 
-## Rodando
+**Desenvolvido por Victor Augusto**
 
-Precisa de docker e docker compose. Se não tem: [baixa aqui](https://www.docker.com/get-started/).
+## Tecnologias
 
-git clone 
+- **Go 1.25** - Backend performático
+- **PostgreSQL + PostGIS** - Consultas geoespaciais  
+- **Redis Streams** - Eventos em tempo real
+- **Docker** - Deploy simplificado
+- **Clean Architecture** - Código organizando e escalável
+
+## Início rápido
+
+```bash
+git clone https://github.com/VictorXdAugusto/engineer-test
 cd engineer-test
 docker-compose up --build
+```
 
-API rodando em: http://localhost:8080
+Aplicação rodando em: **http://localhost:8080**
 
-Testa se tá ok:  
+Teste se está funcionando:
+```bash
 curl http://localhost:8080/health
-# {"status":"healthy"}
+```
 
-## Tech stack
+## Funcionalidades
 
-- Go 1.25  
-- PostgreSQL + PostGIS  
-- Redis  
-- Docker  
+| Endpoint | Descrição |
+|----------|-----------|
+| `POST /api/v1/users` | Criar usuário |
+| `POST /api/v1/positions` | Salvar posição (gera evento) |
+| `GET /api/v1/users/{id}/position` | Posição atual |
+| `GET /api/v1/users/{id}/positions/history` | Histórico de posições |
+| `GET /api/v1/positions/nearby` | Usuários próximos |
+| `GET /api/v1/positions/sector` | Usuários no setor |
 
-## Usando a API
+## Sistema de Eventos (Redis Streams)
 
-Criar usuário:
-curl -X POST http://localhost:8080/api/v1/users \
--H "Content-Type: application/json" \
--d '{"id":"123e4567-e89b-12d3-a456-426614174000","name":"João Silva","email":"joao@exemplo.com","event_id":"meu-evento-2024"}'
+### Como funciona:
+1. Usuário salva nova posição → Evento é publicado no Redis Stream
+2. **3 consumers** processam o evento automaticamente:
+   - **notifications**: Notificações push, emails
+   - **analytics**: Métricas e análises  
+   - **realtime**: WebSocket para tempo real
 
-Salvar localização:
-curl -X POST http://localhost:8080/api/v1/positions \
--H "Content-Type: application/json" \
--d '{"user_id":"123e4567-e89b-12d3-a456-426614174000","latitude":-23.550520,"longitude":-46.633308,"event_id":"meu-evento-2024"}'
+### Monitoramento:
+```bash
+# Ver quantos eventos foram processados
+docker exec geolocation-redis redis-cli XLEN geolocation:position-events
 
-Ver sua posição:
-curl http://localhost:8080/api/v1/users/123e4567-e89b-12d3-a456-426614174000/position
+# Ver últimos eventos
+docker exec geolocation-redis redis-cli XREVRANGE geolocation:position-events + - COUNT 3
 
-Pessoas próximas (1km):
-curl "http://localhost:8080/api/v1/positions/nearby?user_id=123e4567-e89b-12d3-a456-426614174000&latitude=-23.550520&longitude=-46.633308&radius_meters=1000"
+# Status dos consumers
+curl http://localhost:8080/api/v1/events/stats
+```
 
-Se travar, tenta:  
-1. Checar portas 8080, 5432 e 6379  
-2. docker-compose down && docker-compose up --build  
-3. Logs: docker-compose logs app
+## Desenvolvimento
+
+Executar localmente (sem Docker):
+
+```bash
+go mod download
+go generate ./internal/wire
+go build -o bin/server ./cmd/server
+./bin/server
+```
+
+## Troubleshooting
+
+**Problema com portas:**
+```bash
+lsof -i :8080 :5432 :6379
+```
+
+**Reiniciar tudo:**
+```bash
+docker-compose down
+docker-compose up --build
+```
+
+**Ver logs:**
+```bash
+docker-compose logs app | tail -20
+```
+
+---
+
+*Desenvolvido por **Victor Augusto***
