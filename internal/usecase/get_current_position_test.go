@@ -19,6 +19,7 @@ type GetCurrentPositionUseCaseTestSuite struct {
 	suite.Suite
 	userRepo     *mocks.MockUserRepository
 	positionRepo *mocks.MockPositionRepository
+	cache        *mocks.MockCache
 	logger       *mocks.MockLogger
 	useCase      *usecase.GetCurrentPositionUseCase
 	ctx          context.Context
@@ -28,8 +29,9 @@ type GetCurrentPositionUseCaseTestSuite struct {
 func (suite *GetCurrentPositionUseCaseTestSuite) SetupTest() {
 	suite.userRepo = new(mocks.MockUserRepository)
 	suite.positionRepo = new(mocks.MockPositionRepository)
+	suite.cache = new(mocks.MockCache)
 	suite.logger = new(mocks.MockLogger)
-	suite.useCase = usecase.NewGetCurrentPositionUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	suite.useCase = usecase.NewGetCurrentPositionUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 	suite.ctx = context.Background()
 }
 
@@ -37,7 +39,16 @@ func (suite *GetCurrentPositionUseCaseTestSuite) SetupTest() {
 func (suite *GetCurrentPositionUseCaseTestSuite) TearDownTest() {
 	suite.userRepo.AssertExpectations(suite.T())
 	suite.positionRepo.AssertExpectations(suite.T())
+	suite.cache.AssertExpectations(suite.T())
 	suite.logger.AssertExpectations(suite.T())
+}
+
+// addCacheMissMocks adiciona mocks padrão de cache miss para testes de leitura
+func (suite *GetCurrentPositionUseCaseTestSuite) addCacheMissMocks(userID string) {
+	suite.cache.On("GetCachedUserPosition", mock.Anything, userID, mock.Anything).
+		Return(errors.New("cache miss")).Maybe()
+	suite.cache.On("CacheUserPosition", mock.Anything, userID, mock.Anything).
+		Return(nil).Maybe()
 }
 
 // TestGetCurrentPosition_Success testa busca bem-sucedida
@@ -57,6 +68,10 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_Success(
 	position, err := entity.NewPosition("pos-123", *userID, -23.550520, -46.633309, time.Now().Add(-1*time.Hour))
 	suite.Require().NoError(err)
 
+	// Mock: cache miss (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedUserPosition", mock.Anything, "user123", mock.AnythingOfType("*usecase.GetCurrentPositionResponse")).
+		Return(errors.New("cache miss"))
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -65,8 +80,12 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_Success(
 	suite.positionRepo.On("FindCurrentByUserID", mock.Anything, *userID).
 		Return(position, nil)
 
+	// Mock: cache da resposta (quando não há cache hit)
+	suite.cache.On("CacheUserPosition", mock.Anything, "user123", mock.AnythingOfType("*usecase.GetCurrentPositionResponse")).
+		Return(nil).Maybe()
+
 	// Mock: log de sucesso
-	suite.logger.On("Info", "Current position retrieved", mock.Anything).
+	suite.logger.On("Info", "Current position retrieved from database", mock.Anything).
 		Return()
 
 	// Act
@@ -92,6 +111,10 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_UserNotF
 
 	userID, err := entity.NewUserID("user123")
 	suite.Require().NoError(err)
+
+	// Mock: cache miss (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedUserPosition", mock.Anything, "user123", mock.AnythingOfType("*usecase.GetCurrentPositionResponse")).
+		Return(errors.New("cache miss"))
 
 	// Mock: usuário não existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
@@ -123,6 +146,10 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_Position
 	validUser, err := entity.NewUser("user123", "João Silva", "joao@example.com")
 	suite.Require().NoError(err)
 
+	// Mock: cache miss (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedUserPosition", mock.Anything, "user123", mock.AnythingOfType("*usecase.GetCurrentPositionResponse")).
+		Return(errors.New("cache miss"))
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -151,6 +178,10 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_InvalidU
 		UserID: "", // ID vazio é inválido
 	}
 
+	// Mock: cache miss for invalid user ID (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedUserPosition", mock.Anything, "", mock.AnythingOfType("*usecase.GetCurrentPositionResponse")).
+		Return(errors.New("cache miss"))
+
 	// Mock: log de erro para ID inválido
 	suite.logger.On("Error", "Invalid user ID", mock.Anything).
 		Return()
@@ -167,7 +198,7 @@ func (suite *GetCurrentPositionUseCaseTestSuite) TestGetCurrentPosition_InvalidU
 // TestNewGetCurrentPositionUseCase testa o construtor
 func (suite *GetCurrentPositionUseCaseTestSuite) TestNewGetCurrentPositionUseCase() {
 	// Act
-	uc := usecase.NewGetCurrentPositionUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	uc := usecase.NewGetCurrentPositionUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 
 	// Assert
 	assert.NotNil(suite.T(), uc)

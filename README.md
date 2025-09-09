@@ -88,6 +88,17 @@ docker-compose up --build
 docker-compose logs app | tail -20
 ```
 
+# Swagger:
+
+**URL de acesso para a documentação:**
+[http://localhost:8080/swagger/index.html]
+
+
+# Testes unitarios
+
+```bash
+go test ./...
+
 ---
 
 *Desenvolvido por **Victor Augusto***

@@ -33,6 +33,7 @@ type SaveUserPositionUseCase struct {
 	userRepo       repository.UserRepository
 	positionRepo   repository.PositionRepository
 	eventPublisher events.Publisher
+	cache          CacheInterface
 	logger         logger.Logger
 }
 
@@ -41,12 +42,14 @@ func NewSaveUserPositionUseCase(
 	userRepo repository.UserRepository,
 	positionRepo repository.PositionRepository,
 	eventPublisher events.Publisher,
+	cache CacheInterface,
 	logger logger.Logger,
 ) *SaveUserPositionUseCase {
 	return &SaveUserPositionUseCase{
 		userRepo:       userRepo,
 		positionRepo:   positionRepo,
 		eventPublisher: eventPublisher,
+		cache:          cache,
 		logger:         logger,
 	}
 }
@@ -132,7 +135,10 @@ func (uc *SaveUserPositionUseCase) Execute(ctx context.Context, req SaveUserPosi
 		)
 	}
 
-	// 8. Log de sucesso
+	// 8. Invalidar caches relacionados (importante!)
+	uc.invalidateRelatedCaches(ctx, req.UserID)
+
+	// 9. Log de sucesso
 	uc.logger.Info("Position saved successfully", map[string]interface{}{
 		"position_id": position.ID(),
 		"user_id":     user.ID(),
@@ -141,13 +147,46 @@ func (uc *SaveUserPositionUseCase) Execute(ctx context.Context, req SaveUserPosi
 		"longitude":   coordinate.Longitude(),
 	})
 
-	// 9. Retornar resposta
+	// 10. Retornar resposta
 	positionIDEntity := position.ID()
 	return &SaveUserPositionResponse{
 		PositionID: positionIDEntity.String(),
 		SectorID:   position.Sector().ID(),
 		Message:    "Position saved successfully",
 	}, nil
+}
+
+// invalidateRelatedCaches invalida caches relacionados ao usuário
+func (uc *SaveUserPositionUseCase) invalidateRelatedCaches(ctx context.Context, userID string) {
+	// 1. Invalidar cache de posição atual do usuário
+	currentPosKey := fmt.Sprintf("user:position:%s", userID)
+	if err := uc.cache.Delete(ctx, currentPosKey); err != nil {
+		uc.logger.Error("Failed to invalidate current position cache", map[string]interface{}{
+			"user_id": userID,
+			"key":     currentPosKey,
+			"error":   err.Error(),
+		})
+	}
+
+	// 2. Invalidar cache de histórico do usuário (múltiplos limits possíveis)
+	// Nota: Redis pattern matching seria ideal aqui, mas para simplicidade vamos invalidar os mais comuns
+	commonLimits := []int{10, 20, 50, 100}
+	for _, limit := range commonLimits {
+		historyKey := fmt.Sprintf("history:%s:%d", userID, limit)
+		if err := uc.cache.Delete(ctx, historyKey); err != nil {
+			uc.logger.Debug("Failed to invalidate history cache", map[string]interface{}{
+				"user_id": userID,
+				"key":     historyKey,
+				"error":   err.Error(),
+			})
+		}
+	}
+
+	// 3. Log de invalidação
+	uc.logger.Debug("Cache invalidation completed", map[string]interface{}{
+		"user_id": userID,
+		"caches":  []string{"current_position", "history"},
+	})
 }
 
 // publishPositionChangedEvent publica evento quando posição do usuário muda

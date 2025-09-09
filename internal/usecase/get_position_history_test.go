@@ -19,6 +19,7 @@ type GetPositionHistoryUseCaseTestSuite struct {
 	suite.Suite
 	userRepo     *mocks.MockUserRepository
 	positionRepo *mocks.MockPositionRepository
+	cache        *mocks.MockCache
 	logger       *mocks.MockLogger
 	useCase      *usecase.GetPositionHistoryUseCase
 	ctx          context.Context
@@ -28,8 +29,9 @@ type GetPositionHistoryUseCaseTestSuite struct {
 func (suite *GetPositionHistoryUseCaseTestSuite) SetupTest() {
 	suite.userRepo = new(mocks.MockUserRepository)
 	suite.positionRepo = new(mocks.MockPositionRepository)
+	suite.cache = new(mocks.MockCache)
 	suite.logger = new(mocks.MockLogger)
-	suite.useCase = usecase.NewGetPositionHistoryUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	suite.useCase = usecase.NewGetPositionHistoryUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 	suite.ctx = context.Background()
 }
 
@@ -37,7 +39,16 @@ func (suite *GetPositionHistoryUseCaseTestSuite) SetupTest() {
 func (suite *GetPositionHistoryUseCaseTestSuite) TearDownTest() {
 	suite.userRepo.AssertExpectations(suite.T())
 	suite.positionRepo.AssertExpectations(suite.T())
+	suite.cache.AssertExpectations(suite.T())
 	suite.logger.AssertExpectations(suite.T())
+}
+
+// addCacheMissMocks adiciona mocks padrão de cache miss para testes de leitura
+func (suite *GetPositionHistoryUseCaseTestSuite) addCacheMissMocks(userID string, limit int) {
+	suite.cache.On("GetCachedUserHistory", mock.Anything, userID, limit, mock.Anything).
+		Return(errors.New("cache miss")).Maybe()
+	suite.cache.On("CacheUserHistory", mock.Anything, userID, limit, mock.Anything).
+		Return(nil).Maybe()
 }
 
 // TestGetPositionHistory_Success testa busca bem-sucedida
@@ -63,6 +74,10 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_Success(
 
 	positions := []*entity.Position{position1, position2}
 
+	// Mock: cache miss primeiro
+	suite.cache.On("GetCachedUserHistory", mock.Anything, request.UserID, 10, mock.Anything).
+		Return(errors.New("cache miss"))
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -71,8 +86,12 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_Success(
 	suite.positionRepo.On("FindHistoryByUserID", mock.Anything, *userID, 10).
 		Return(positions, nil)
 
-	// Mock: log de sucesso
-	suite.logger.On("Info", "Position history retrieved", mock.Anything).
+	// Mock: cachear o resultado
+	suite.cache.On("CacheUserHistory", mock.Anything, request.UserID, 10, mock.Anything).
+		Return(nil)
+
+	// Mock: log de sucesso do banco de dados
+	suite.logger.On("Info", "Position history retrieved from database", mock.Anything).
 		Return()
 
 	// Act
@@ -99,6 +118,10 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_UserNotF
 
 	userID, err := entity.NewUserID("user123")
 	suite.Require().NoError(err)
+
+	// Mock: cache miss primeiro
+	suite.cache.On("GetCachedUserHistory", mock.Anything, request.UserID, 10, mock.Anything).
+		Return(errors.New("cache miss"))
 
 	// Mock: usuário não existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
@@ -132,6 +155,9 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_Reposito
 	suite.Require().NoError(err)
 
 	repoError := errors.New("database error")
+
+	// Adicionar mocks de cache miss
+	suite.addCacheMissMocks(request.UserID, request.Limit)
 
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
@@ -168,6 +194,9 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_EmptyHis
 	validUser, err := entity.NewUser("user123", "João Silva", "joao@example.com")
 	suite.Require().NoError(err)
 
+	// Adicionar mocks de cache miss
+	suite.addCacheMissMocks(request.UserID, request.Limit)
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -176,8 +205,8 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_EmptyHis
 	suite.positionRepo.On("FindHistoryByUserID", mock.Anything, *userID, 10).
 		Return([]*entity.Position{}, nil)
 
-	// Mock: log de sucesso
-	suite.logger.On("Info", "Position history retrieved", mock.Anything).
+	// Mock: log de sucesso do banco de dados
+	suite.logger.On("Info", "Position history retrieved from database", mock.Anything).
 		Return()
 
 	// Act
@@ -198,6 +227,9 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_InvalidU
 		UserID: "", // ID vazio é inválido
 		Limit:  10,
 	}
+
+	// Adicionar mocks de cache miss (pode ser chamado mesmo com ID inválido)
+	suite.addCacheMissMocks(request.UserID, request.Limit)
 
 	// Mock: log de erro para ID inválido
 	suite.logger.On("Error", "Invalid user ID", mock.Anything).
@@ -226,6 +258,9 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_DefaultL
 	validUser, err := entity.NewUser("user123", "João Silva", "joao@example.com")
 	suite.Require().NoError(err)
 
+	// Adicionar mocks de cache miss (limite será convertido para 10)
+	suite.addCacheMissMocks(request.UserID, 10)
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -234,8 +269,8 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_DefaultL
 	suite.positionRepo.On("FindHistoryByUserID", mock.Anything, *userID, 10).
 		Return([]*entity.Position{}, nil)
 
-	// Mock: log de sucesso
-	suite.logger.On("Info", "Position history retrieved", mock.Anything).
+	// Mock: log de sucesso do banco de dados
+	suite.logger.On("Info", "Position history retrieved from database", mock.Anything).
 		Return()
 
 	// Act
@@ -249,7 +284,7 @@ func (suite *GetPositionHistoryUseCaseTestSuite) TestGetPositionHistory_DefaultL
 // TestNewGetPositionHistoryUseCase testa o construtor
 func (suite *GetPositionHistoryUseCaseTestSuite) TestNewGetPositionHistoryUseCase() {
 	// Act
-	uc := usecase.NewGetPositionHistoryUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	uc := usecase.NewGetPositionHistoryUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 
 	// Assert
 	assert.NotNil(suite.T(), uc)

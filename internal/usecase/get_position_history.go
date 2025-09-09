@@ -38,6 +38,7 @@ type GetPositionHistoryResponse struct {
 type GetPositionHistoryUseCase struct {
 	userRepo     repository.UserRepository
 	positionRepo repository.PositionRepository
+	cache        CacheInterface
 	logger       logger.Logger
 }
 
@@ -45,11 +46,13 @@ type GetPositionHistoryUseCase struct {
 func NewGetPositionHistoryUseCase(
 	userRepo repository.UserRepository,
 	positionRepo repository.PositionRepository,
+	cache CacheInterface,
 	logger logger.Logger,
 ) *GetPositionHistoryUseCase {
 	return &GetPositionHistoryUseCase{
 		userRepo:     userRepo,
 		positionRepo: positionRepo,
+		cache:        cache,
 		logger:       logger,
 	}
 }
@@ -64,7 +67,20 @@ func (uc *GetPositionHistoryUseCase) Execute(ctx context.Context, req GetPositio
 		req.Limit = 100 // Máximo: 100 posições
 	}
 
-	// 2. Validar se o usuário existe
+	// 2. Tentar buscar no cache primeiro
+	var cachedResponse GetPositionHistoryResponse
+
+	if err := uc.cache.GetCachedUserHistory(ctx, req.UserID, req.Limit, &cachedResponse); err == nil {
+		uc.logger.Info("Cache hit for position history", map[string]interface{}{
+			"user_id": req.UserID,
+			"limit":   req.Limit,
+			"total":   cachedResponse.Total,
+			"source":  "cache",
+		})
+		return &cachedResponse, nil
+	}
+
+	// 3. Cache miss - buscar dados completos
 	userIDPtr, err := entity.NewUserID(req.UserID)
 	if err != nil {
 		uc.logger.Error("Invalid user ID", map[string]interface{}{
@@ -84,7 +100,7 @@ func (uc *GetPositionHistoryUseCase) Execute(ctx context.Context, req GetPositio
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	// 3. Buscar histórico de posições
+	// 4. Buscar histórico de posições
 	positions, err := uc.positionRepo.FindHistoryByUserID(ctx, userID, req.Limit)
 	if err != nil {
 		uc.logger.Error("Failed to get position history", map[string]interface{}{
@@ -95,7 +111,7 @@ func (uc *GetPositionHistoryUseCase) Execute(ctx context.Context, req GetPositio
 		return nil, fmt.Errorf("failed to get position history: %w", err)
 	}
 
-	// 4. Converter para resposta
+	// 5. Converter para resposta
 	var history []PositionHistoryItem
 	for _, position := range positions {
 		coordinate := position.Coordinate()
@@ -113,7 +129,7 @@ func (uc *GetPositionHistoryUseCase) Execute(ctx context.Context, req GetPositio
 		history = append(history, item)
 	}
 
-	// 5. Preparar resposta
+	// 6. Preparar resposta
 	userIDValue := user.ID()
 	response := &GetPositionHistoryResponse{
 		UserID:   userIDValue.String(),
@@ -123,11 +139,22 @@ func (uc *GetPositionHistoryUseCase) Execute(ctx context.Context, req GetPositio
 		Message:  fmt.Sprintf("Retrieved %d position records", len(history)),
 	}
 
-	// 6. Log de sucesso
-	uc.logger.Info("Position history retrieved", map[string]interface{}{
+	// 7. Cachear resultado com TTL baixo (1 minuto)
+	if cacheErr := uc.cache.CacheUserHistory(ctx, req.UserID, req.Limit, response); cacheErr != nil {
+		uc.logger.Error("Failed to cache position history", map[string]interface{}{
+			"user_id": req.UserID,
+			"limit":   req.Limit,
+			"error":   cacheErr.Error(),
+		})
+		// Não falhar a operação por erro de cache
+	}
+
+	// 8. Log de sucesso
+	uc.logger.Info("Position history retrieved from database", map[string]interface{}{
 		"user_id": req.UserID,
 		"total":   len(history),
 		"limit":   req.Limit,
+		"source":  "database",
 	})
 
 	return response, nil

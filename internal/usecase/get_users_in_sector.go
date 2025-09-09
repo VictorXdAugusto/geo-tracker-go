@@ -49,6 +49,7 @@ type SectorBounds struct {
 type GetUsersInSectorUseCase struct {
 	userRepo     repository.UserRepository
 	positionRepo repository.PositionRepository
+	cache        CacheInterface
 	logger       logger.Logger
 }
 
@@ -56,11 +57,13 @@ type GetUsersInSectorUseCase struct {
 func NewGetUsersInSectorUseCase(
 	userRepo repository.UserRepository,
 	positionRepo repository.PositionRepository,
+	cache CacheInterface,
 	logger logger.Logger,
 ) *GetUsersInSectorUseCase {
 	return &GetUsersInSectorUseCase{
 		userRepo:     userRepo,
 		positionRepo: positionRepo,
+		cache:        cache,
 		logger:       logger,
 	}
 }

@@ -19,6 +19,7 @@ type GetUsersInSectorUseCaseTestSuite struct {
 	suite.Suite
 	userRepo     *mocks.MockUserRepository
 	positionRepo *mocks.MockPositionRepository
+	cache        *mocks.MockCache
 	logger       *mocks.MockLogger
 	useCase      *usecase.GetUsersInSectorUseCase
 	ctx          context.Context
@@ -28,8 +29,9 @@ type GetUsersInSectorUseCaseTestSuite struct {
 func (suite *GetUsersInSectorUseCaseTestSuite) SetupTest() {
 	suite.userRepo = new(mocks.MockUserRepository)
 	suite.positionRepo = new(mocks.MockPositionRepository)
+	suite.cache = new(mocks.MockCache)
 	suite.logger = new(mocks.MockLogger)
-	suite.useCase = usecase.NewGetUsersInSectorUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	suite.useCase = usecase.NewGetUsersInSectorUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 	suite.ctx = context.Background()
 }
 
@@ -37,6 +39,7 @@ func (suite *GetUsersInSectorUseCaseTestSuite) SetupTest() {
 func (suite *GetUsersInSectorUseCaseTestSuite) TearDownTest() {
 	suite.userRepo.AssertExpectations(suite.T())
 	suite.positionRepo.AssertExpectations(suite.T())
+	suite.cache.AssertExpectations(suite.T())
 	suite.logger.AssertExpectations(suite.T())
 }
 
@@ -307,7 +310,7 @@ func (suite *GetUsersInSectorUseCaseTestSuite) TestGetUsersInSector_ExcludeSelf(
 // TestNewGetUsersInSectorUseCase testa o construtor
 func (suite *GetUsersInSectorUseCaseTestSuite) TestNewGetUsersInSectorUseCase() {
 	// Act
-	uc := usecase.NewGetUsersInSectorUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	uc := usecase.NewGetUsersInSectorUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 
 	// Assert
 	assert.NotNil(suite.T(), uc)

@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ type SaveUserPositionUseCaseTestSuite struct {
 	userRepo       *mocks.MockUserRepository
 	positionRepo   *mocks.MockPositionRepository
 	eventPublisher *mocks.MockEventPublisher
+	cache          *mocks.MockCache
 	logger         *mocks.MockLogger
 	useCase        *usecase.SaveUserPositionUseCase
 	ctx            context.Context
@@ -31,11 +33,13 @@ func (suite *SaveUserPositionUseCaseTestSuite) SetupTest() {
 	suite.userRepo = new(mocks.MockUserRepository)
 	suite.positionRepo = new(mocks.MockPositionRepository)
 	suite.eventPublisher = new(mocks.MockEventPublisher)
+	suite.cache = new(mocks.MockCache)
 	suite.logger = new(mocks.MockLogger)
 	suite.useCase = usecase.NewSaveUserPositionUseCase(
 		suite.userRepo,
 		suite.positionRepo,
 		suite.eventPublisher,
+		suite.cache,
 		suite.logger,
 	)
 	suite.ctx = context.Background()
@@ -51,7 +55,19 @@ func (suite *SaveUserPositionUseCaseTestSuite) TearDownTest() {
 	suite.userRepo.AssertExpectations(suite.T())
 	suite.positionRepo.AssertExpectations(suite.T())
 	suite.eventPublisher.AssertExpectations(suite.T())
+	suite.cache.AssertExpectations(suite.T())
 	suite.logger.AssertExpectations(suite.T())
+}
+
+// addCacheInvalidationMocks adiciona mocks de invalidação de cache para testes de escrita
+func (suite *SaveUserPositionUseCaseTestSuite) addCacheInvalidationMocks(userID string) {
+	// Mocks para invalidação de cache (podem falhar sem quebrar o teste)
+	suite.cache.On("Delete", mock.Anything, mock.MatchedBy(func(key string) bool {
+		return strings.Contains(key, userID)
+	})).Return(nil).Maybe()
+
+	// Mock para log de debug da invalidação do cache
+	suite.logger.On("Debug", "Cache invalidation completed", mock.Anything).Return().Maybe()
 }
 
 // TestSaveUserPosition_Success testa salvamento bem-sucedido de posição
@@ -67,6 +83,9 @@ func (suite *SaveUserPositionUseCaseTestSuite) TestSaveUserPosition_Success() {
 
 	userID, err := entity.NewUserID("user123")
 	suite.Require().NoError(err)
+
+	// Adicionar mocks de invalidação de cache
+	suite.addCacheInvalidationMocks(request.UserID)
 
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
@@ -251,6 +270,9 @@ func (suite *SaveUserPositionUseCaseTestSuite) TestSaveUserPosition_EventPublish
 
 	eventError := errors.New("event publisher failed")
 
+	// Adicionar mocks de invalidação de cache
+	suite.addCacheInvalidationMocks(request.UserID)
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(suite.validUser, nil)
@@ -314,6 +336,7 @@ func (suite *SaveUserPositionUseCaseTestSuite) TestNewSaveUserPositionUseCase() 
 		suite.userRepo,
 		suite.positionRepo,
 		suite.eventPublisher,
+		suite.cache,
 		suite.logger,
 	)
 

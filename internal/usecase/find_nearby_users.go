@@ -43,6 +43,7 @@ type FindNearbyUsersResponse struct {
 type FindNearbyUsersUseCase struct {
 	userRepo     repository.UserRepository
 	positionRepo repository.PositionRepository
+	cache        CacheInterface
 	logger       logger.Logger
 }
 
@@ -50,18 +51,45 @@ type FindNearbyUsersUseCase struct {
 func NewFindNearbyUsersUseCase(
 	userRepo repository.UserRepository,
 	positionRepo repository.PositionRepository,
+	cache CacheInterface,
 	logger logger.Logger,
 ) *FindNearbyUsersUseCase {
 	return &FindNearbyUsersUseCase{
 		userRepo:     userRepo,
 		positionRepo: positionRepo,
+		cache:        cache,
 		logger:       logger,
 	}
 }
 
 // Execute executa o use case de buscar usuários próximos
 func (uc *FindNearbyUsersUseCase) Execute(ctx context.Context, req FindNearbyUsersRequest) (*FindNearbyUsersResponse, error) {
-	// 1. Validar se o usuário existe
+	// 1. Tentar buscar no cache primeiro (apenas para coordenadas fixas, sem considerar user_id)
+	var cachedResponse FindNearbyUsersResponse
+	if err := uc.cache.GetCachedNearbyUsers(ctx, req.Latitude, req.Longitude, req.RadiusM, &cachedResponse); err == nil {
+		// Ajustar o search center para o usuário atual se ele estiver nos resultados
+		searchCenter, nearbyUsers := uc.adjustSearchCenterFromCache(cachedResponse, req.UserID)
+
+		response := &FindNearbyUsersResponse{
+			SearchCenter: searchCenter,
+			NearbyUsers:  nearbyUsers,
+			TotalFound:   len(nearbyUsers),
+			Message:      fmt.Sprintf("Found %d users within %.0fm radius", len(nearbyUsers), req.RadiusM),
+		}
+
+		uc.logger.Info("Cache hit for nearby users search", map[string]interface{}{
+			"user_id":     req.UserID,
+			"latitude":    req.Latitude,
+			"longitude":   req.Longitude,
+			"radius":      req.RadiusM,
+			"total_found": len(nearbyUsers),
+			"source":      "cache",
+		})
+
+		return response, nil
+	}
+
+	// 2. Cache miss - executar busca completa
 	userIDPtr, err := entity.NewUserID(req.UserID)
 	if err != nil {
 		uc.logger.Error("Invalid user ID", map[string]interface{}{
@@ -81,7 +109,7 @@ func (uc *FindNearbyUsersUseCase) Execute(ctx context.Context, req FindNearbyUse
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	// 2. Validar coordenadas de busca
+	// 3. Validar coordenadas de busca
 	searchCoordinate, err := valueobject.NewCoordinate(req.Latitude, req.Longitude)
 	if err != nil {
 		uc.logger.Error("Invalid search coordinates", map[string]interface{}{
@@ -92,13 +120,13 @@ func (uc *FindNearbyUsersUseCase) Execute(ctx context.Context, req FindNearbyUse
 		return nil, fmt.Errorf("invalid search coordinates: %w", err)
 	}
 
-	// 3. Definir valores padrão
+	// 4. Definir valores padrão
 	maxResults := req.MaxResults
 	if maxResults <= 0 {
 		maxResults = 20 // Padrão: 20 resultados
 	}
 
-	// 4. Buscar posições próximas
+	// 5. Buscar posições próximas
 	nearbyPositions, err := uc.positionRepo.FindNearby(ctx, searchCoordinate, req.RadiusM, maxResults+1)
 	if err != nil {
 		uc.logger.Error("Failed to find nearby positions", map[string]interface{}{
@@ -111,7 +139,7 @@ func (uc *FindNearbyUsersUseCase) Execute(ctx context.Context, req FindNearbyUse
 		return nil, fmt.Errorf("failed to find nearby positions: %w", err)
 	}
 
-	// 5. Processar resultados
+	// 6. Processar resultados
 	var nearbyUsers []NearbyUserResponse
 	searchCenterSet := false
 	var searchCenter NearbyUserResponse
@@ -157,26 +185,62 @@ func (uc *FindNearbyUsersUseCase) Execute(ctx context.Context, req FindNearbyUse
 		}
 	}
 
-	// 6. Limitar resultados
+	// 7. Limitar resultados
 	if len(nearbyUsers) > maxResults {
 		nearbyUsers = nearbyUsers[:maxResults]
 	}
 
-	// 7. Log de sucesso
-	uc.logger.Info("Nearby users search completed", map[string]interface{}{
+	// 8. Preparar resposta para cache
+	response := &FindNearbyUsersResponse{
+		SearchCenter: searchCenter,
+		NearbyUsers:  nearbyUsers,
+		TotalFound:   len(nearbyUsers),
+		Message:      fmt.Sprintf("Found %d users within %.0fm radius", len(nearbyUsers), req.RadiusM),
+	}
+
+	// 9. Salvar no cache (sem o search center específico, para reutilização)
+	cacheableResponse := FindNearbyUsersResponse{
+		NearbyUsers: append(nearbyUsers, searchCenter), // Incluir todos os usuários
+		TotalFound:  len(nearbyUsers) + 1,
+		Message:     response.Message,
+	}
+	if cacheErr := uc.cache.CacheNearbyUsers(ctx, req.Latitude, req.Longitude, req.RadiusM, cacheableResponse); cacheErr != nil {
+		uc.logger.Error("Failed to cache nearby users", map[string]interface{}{
+			"latitude":  req.Latitude,
+			"longitude": req.Longitude,
+			"radius":    req.RadiusM,
+			"error":     cacheErr.Error(),
+		})
+		// Não falhar a operação por erro de cache
+	}
+
+	// 10. Log de sucesso
+	uc.logger.Info("Nearby users search completed from database", map[string]interface{}{
 		"user_id":     req.UserID,
 		"latitude":    req.Latitude,
 		"longitude":   req.Longitude,
 		"radius":      req.RadiusM,
 		"total_found": len(nearbyUsers),
 		"has_center":  searchCenterSet,
+		"source":      "database",
 	})
 
-	// 8. Retornar resposta
-	return &FindNearbyUsersResponse{
-		SearchCenter: searchCenter,
-		NearbyUsers:  nearbyUsers,
-		TotalFound:   len(nearbyUsers),
-		Message:      fmt.Sprintf("Found %d users within %.0fm radius", len(nearbyUsers), req.RadiusM),
-	}, nil
+	return response, nil
+}
+
+// adjustSearchCenterFromCache ajusta o search center baseado no usuário atual
+func (uc *FindNearbyUsersUseCase) adjustSearchCenterFromCache(cachedResponse FindNearbyUsersResponse, userID string) (NearbyUserResponse, []NearbyUserResponse) {
+	var searchCenter NearbyUserResponse
+	var nearbyUsers []NearbyUserResponse
+
+	// Procurar o usuário nos resultados cached
+	for _, user := range cachedResponse.NearbyUsers {
+		if user.UserID == userID {
+			searchCenter = user
+		} else {
+			nearbyUsers = append(nearbyUsers, user)
+		}
+	}
+
+	return searchCenter, nearbyUsers
 }

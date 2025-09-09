@@ -24,6 +24,7 @@ var InfrastructureSet = wire.NewSet(
 
 	// Redis and Events
 	cache.NewRedis,
+	NewCacheInterface,
 	NewRedisEventPublisher,
 )
 
@@ -46,4 +47,9 @@ var ApplicationSet = wire.NewSet(
 // NewRedisEventPublisher cria um novo publisher usando Redis client
 func NewRedisEventPublisher(redis *cache.Redis, logger logger.Logger) events.Publisher {
 	return infraEvents.NewRedisStreamPublisher(redis.Client(), logger)
+}
+
+// NewCacheInterface converte *cache.Redis para usecase.CacheInterface
+func NewCacheInterface(redis *cache.Redis) usecase.CacheInterface {
+	return redis
 }

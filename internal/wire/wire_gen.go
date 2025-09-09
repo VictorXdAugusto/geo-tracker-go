@@ -35,11 +35,12 @@ func InitializeContainer() (*Container, error) {
 		return nil, err
 	}
 	publisher := NewRedisEventPublisher(redis, loggerLogger)
-	saveUserPositionUseCase := usecase.NewSaveUserPositionUseCase(userRepository, positionRepository, publisher, loggerLogger)
-	findNearbyUsersUseCase := usecase.NewFindNearbyUsersUseCase(userRepository, positionRepository, loggerLogger)
-	getUsersInSectorUseCase := usecase.NewGetUsersInSectorUseCase(userRepository, positionRepository, loggerLogger)
-	getCurrentPositionUseCase := usecase.NewGetCurrentPositionUseCase(userRepository, positionRepository, loggerLogger)
-	getPositionHistoryUseCase := usecase.NewGetPositionHistoryUseCase(userRepository, positionRepository, loggerLogger)
+	cacheInterface := NewCacheInterface(redis)
+	saveUserPositionUseCase := usecase.NewSaveUserPositionUseCase(userRepository, positionRepository, publisher, cacheInterface, loggerLogger)
+	findNearbyUsersUseCase := usecase.NewFindNearbyUsersUseCase(userRepository, positionRepository, cacheInterface, loggerLogger)
+	getUsersInSectorUseCase := usecase.NewGetUsersInSectorUseCase(userRepository, positionRepository, cacheInterface, loggerLogger)
+	getCurrentPositionUseCase := usecase.NewGetCurrentPositionUseCase(userRepository, positionRepository, cacheInterface, loggerLogger)
+	getPositionHistoryUseCase := usecase.NewGetPositionHistoryUseCase(userRepository, positionRepository, cacheInterface, loggerLogger)
 	container := NewContainer(createUserUseCase, saveUserPositionUseCase, findNearbyUsersUseCase, getUsersInSectorUseCase, getCurrentPositionUseCase, getPositionHistoryUseCase)
 	return container, nil
 }

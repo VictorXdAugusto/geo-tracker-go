@@ -18,6 +18,7 @@ type FindNearbyUsersUseCaseTestSuite struct {
 	suite.Suite
 	userRepo     *mocks.MockUserRepository
 	positionRepo *mocks.MockPositionRepository
+	cache        *mocks.MockCache
 	logger       *mocks.MockLogger
 	useCase      *usecase.FindNearbyUsersUseCase
 	ctx          context.Context
@@ -27,8 +28,9 @@ type FindNearbyUsersUseCaseTestSuite struct {
 func (suite *FindNearbyUsersUseCaseTestSuite) SetupTest() {
 	suite.userRepo = new(mocks.MockUserRepository)
 	suite.positionRepo = new(mocks.MockPositionRepository)
+	suite.cache = new(mocks.MockCache)
 	suite.logger = new(mocks.MockLogger)
-	suite.useCase = usecase.NewFindNearbyUsersUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	suite.useCase = usecase.NewFindNearbyUsersUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 	suite.ctx = context.Background()
 }
 
@@ -36,6 +38,7 @@ func (suite *FindNearbyUsersUseCaseTestSuite) SetupTest() {
 func (suite *FindNearbyUsersUseCaseTestSuite) TearDownTest() {
 	suite.userRepo.AssertExpectations(suite.T())
 	suite.positionRepo.AssertExpectations(suite.T())
+	suite.cache.AssertExpectations(suite.T())
 	suite.logger.AssertExpectations(suite.T())
 }
 
@@ -56,6 +59,10 @@ func (suite *FindNearbyUsersUseCaseTestSuite) TestFindNearbyUsers_Success() {
 	validUser, err := entity.NewUser("user123", "João Silva", "joao@example.com")
 	suite.Require().NoError(err)
 
+	// Mock: cache miss - buscar no cache primeiro
+	suite.cache.On("GetCachedNearbyUsers", mock.Anything, request.Latitude, request.Longitude, request.RadiusM, mock.Anything).
+		Return(errors.New("cache miss"))
+
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
@@ -65,8 +72,12 @@ func (suite *FindNearbyUsersUseCaseTestSuite) TestFindNearbyUsers_Success() {
 	suite.positionRepo.On("FindNearby", mock.Anything, mock.Anything, 1000.0, 11).
 		Return(positions, nil)
 
-	// Mock: log de sucesso
-	suite.logger.On("Info", "Nearby users search completed", mock.Anything).
+	// Mock: cachear resultado
+	suite.cache.On("CacheNearbyUsers", mock.Anything, request.Latitude, request.Longitude, request.RadiusM, mock.Anything).
+		Return(nil)
+
+	// Mock: log de cache miss e sucesso da busca no banco
+	suite.logger.On("Info", "Nearby users search completed from database", mock.Anything).
 		Return()
 
 	// Act
@@ -99,6 +110,10 @@ func (suite *FindNearbyUsersUseCaseTestSuite) TestFindNearbyUsers_InvalidCoordin
 	// Mock: usuário existe
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
+
+	// Mock: cache miss (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedNearbyUsers", mock.Anything, mock.AnythingOfType("float64"), mock.AnythingOfType("float64"), mock.AnythingOfType("float64"), mock.AnythingOfType("*usecase.FindNearbyUsersResponse")).
+		Return(errors.New("cache miss"))
 
 	// Mock: log de erro pode ser chamado
 	suite.logger.On("Error", "Invalid search coordinates", mock.Anything).
@@ -136,6 +151,10 @@ func (suite *FindNearbyUsersUseCaseTestSuite) TestFindNearbyUsers_RepositoryErro
 	suite.userRepo.On("FindByID", mock.Anything, *userID).
 		Return(validUser, nil)
 
+	// Mock: cache miss (retorna erro indicando cache miss)
+	suite.cache.On("GetCachedNearbyUsers", mock.Anything, mock.AnythingOfType("float64"), mock.AnythingOfType("float64"), mock.AnythingOfType("float64"), mock.AnythingOfType("*usecase.FindNearbyUsersResponse")).
+		Return(errors.New("cache miss"))
+
 	// Mock: erro no repositório - O use case chama com maxResults+1 = 11
 	suite.positionRepo.On("FindNearby", mock.Anything, mock.Anything, 1000.0, 11).
 		Return(nil, repoError)
@@ -156,7 +175,7 @@ func (suite *FindNearbyUsersUseCaseTestSuite) TestFindNearbyUsers_RepositoryErro
 // TestNewFindNearbyUsersUseCase testa o construtor
 func (suite *FindNearbyUsersUseCaseTestSuite) TestNewFindNearbyUsersUseCase() {
 	// Act
-	uc := usecase.NewFindNearbyUsersUseCase(suite.userRepo, suite.positionRepo, suite.logger)
+	uc := usecase.NewFindNearbyUsersUseCase(suite.userRepo, suite.positionRepo, suite.cache, suite.logger)
 
 	// Assert
 	assert.NotNil(suite.T(), uc)

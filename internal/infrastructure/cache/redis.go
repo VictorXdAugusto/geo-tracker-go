@@ -7,9 +7,13 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/vitao/geolocation-tracker/internal/usecase"
 	"github.com/vitao/geolocation-tracker/pkg/config"
 	"github.com/vitao/geolocation-tracker/pkg/logger"
 )
+
+// Verificar se Redis implementa a interface
+var _ usecase.CacheInterface = (*Redis)(nil)
 
 // Redis representa o cliente Redis para cache
 type Redis struct {
@@ -166,6 +170,50 @@ func (r *Redis) CacheNearbyUsers(ctx context.Context, lat, lng, radius float64, 
 func (r *Redis) GetCachedNearbyUsers(ctx context.Context, lat, lng, radius float64, dest interface{}) error {
 	key := fmt.Sprintf("nearby:%.6f:%.6f:%.0f", lat, lng, radius)
 	return r.Get(ctx, key, dest)
+}
+
+// CacheUserHistory armazena histórico de posições de um usuário no cache
+func (r *Redis) CacheUserHistory(ctx context.Context, userID string, limit int, history interface{}) error {
+	key := fmt.Sprintf("history:%s:%d", userID, limit)
+	expiration := 1 * time.Minute // Cache por 1 minuto (dados dinâmicos)
+
+	return r.Set(ctx, key, history, expiration)
+}
+
+// GetCachedUserHistory recupera histórico de posições de um usuário do cache
+func (r *Redis) GetCachedUserHistory(ctx context.Context, userID string, limit int, dest interface{}) error {
+	key := fmt.Sprintf("history:%s:%d", userID, limit)
+	return r.Get(ctx, key, dest)
+}
+
+// InvalidateUserCaches invalida todos os caches relacionados a um usuário
+func (r *Redis) InvalidateUserCaches(ctx context.Context, userID string) error {
+	// Padrão de chaves relacionadas ao usuário
+	patterns := []string{
+		fmt.Sprintf("user:position:%s", userID),
+		fmt.Sprintf("history:%s:*", userID),
+	}
+
+	var lastError error
+	for _, pattern := range patterns {
+		if err := r.Delete(ctx, pattern); err != nil {
+			r.logger.Error("Failed to invalidate user cache pattern",
+				"user_id", userID,
+				"pattern", pattern,
+				"error", err.Error(),
+			)
+			lastError = err
+		}
+	}
+
+	if lastError == nil {
+		r.logger.Debug("User caches invalidated successfully",
+			"user_id", userID,
+			"patterns", len(patterns),
+		)
+	}
+
+	return lastError
 }
 
 // LogStats registra estatísticas do Redis
