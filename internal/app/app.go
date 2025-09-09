@@ -10,16 +10,19 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/vitao/geolocation-tracker/internal/infrastructure/events"
 	"github.com/vitao/geolocation-tracker/internal/interfaces/http/routes"
-	"github.com/vitao/geolocation-tracker/internal/usecase"
+	"github.com/vitao/geolocation-tracker/internal/wire"
 	"github.com/vitao/geolocation-tracker/pkg/config"
 	"github.com/vitao/geolocation-tracker/pkg/logger"
 )
 
 type Application struct {
-	config *config.Config
-	logger logger.Logger
-	server *http.Server
+	config       *config.Config
+	logger       logger.Logger
+	server       *http.Server
+	container    *wire.Container
+	eventService *events.EventService
 }
 
 // New cria uma nova instância da aplicação
@@ -38,9 +41,26 @@ func New() (*Application, error) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	// Inicializar container via Wire
+	container, err := wire.InitializeContainer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize container: %w", err)
+	}
+
+	// Inicializar Redis (extraído do container)
+	redis, err := wire.InitializeRedis()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Redis: %w", err)
+	}
+
+	// Inicializar event service
+	eventService := events.NewEventService(redis, log)
+
 	app := &Application{
-		config: cfg,
-		logger: log,
+		config:       cfg,
+		logger:       log,
+		container:    container,
+		eventService: eventService,
 	}
 
 	return app, nil
@@ -48,10 +68,17 @@ func New() (*Application, error) {
 
 // Start inicia a aplicação
 func (a *Application) Start() error {
-	// Configurar rotas
+	a.logger.Info("Starting Geolocation Tracker Application...")
+
+	// 1. Iniciar event service
+	if err := a.eventService.Start(); err != nil {
+		return fmt.Errorf("failed to start event service: %w", err)
+	}
+
+	// 2. Configurar rotas
 	router := a.setupRoutes()
 
-	// Configurar servidor HTTP
+	// 3. Configurar servidor HTTP
 	a.server = &http.Server{
 		Addr:         ":" + a.config.Port,
 		Handler:      router,
@@ -82,43 +109,67 @@ func (a *Application) Start() error {
 
 	return a.gracefulShutdown()
 }
+
 // setupRoutes configura todas as rotas da aplicação
 func (a *Application) setupRoutes() *gin.Engine {
-	router := gin.New()
+	router := routes.SetupRoutes(
+		a.container.CreateUser,
+		a.container.SaveUserPosition,
+		a.container.FindNearbyUsers,
+		a.container.GetUsersInSector,
+		a.container.GetCurrentPosition,
+		a.container.GetPositionHistory,
+		a.logger,
+	)
 
-	// Middlewares básicos do Gin
-	router.Use(gin.Recovery())
-
-	// Create use case instances
-	createUserUseCase := &usecase.CreateUserUseCase{}
-	saveUserPositionUseCase := &usecase.SaveUserPositionUseCase{}
-	findNearbyUsersUseCase := &usecase.FindNearbyUsersUseCase{}
-	getUsersInSectorUseCase := &usecase.GetUsersInSectorUseCase{}
-	getCurrentPositionUseCase := &usecase.GetCurrentPositionUseCase{}
-	getPositionHistoryUseCase := &usecase.GetPositionHistoryUseCase{}
-
-	// Configurar todas as rotas (middlewares incluídos internamente)
-	routes.SetupRoutes(createUserUseCase, saveUserPositionUseCase, findNearbyUsersUseCase, getUsersInSectorUseCase, getCurrentPositionUseCase, getPositionHistoryUseCase, a.logger)
+	// Adicionar endpoint para estatísticas de eventos
+	router.GET("/api/v1/events/stats", a.handleEventStats)
 
 	return router
 }
 
+// handleEventStats retorna estatísticas dos eventos
+func (a *Application) handleEventStats(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	stats, err := a.eventService.GetStats(ctx)
+	if err != nil {
+		a.logger.Error("Failed to get event stats", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get event statistics",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data":   stats,
+	})
+}
+
 // gracefulShutdown realiza o encerramento gracioso da aplicação
 func (a *Application) gracefulShutdown() error {
+	a.logger.Info("Starting graceful shutdown...")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Shutdown do servidor HTTP
+	// 1. Shutdown do servidor HTTP
 	if err := a.server.Shutdown(ctx); err != nil {
 		a.logger.Error("Server forced to shutdown", "error", err)
 		return err
 	}
+	a.logger.Info("HTTP server stopped")
 
-	// Sync dos logs pendentes
+	// 2. Parar event service
+	a.eventService.Stop()
+
+	// 3. Sync dos logs pendentes
 	if err := a.logger.Sync(); err != nil {
 		return fmt.Errorf("failed to sync logger: %w", err)
 	}
 
-	a.logger.Info("Server exited gracefully")
+	a.logger.Info("Application shutdown completed")
 	return nil
 }

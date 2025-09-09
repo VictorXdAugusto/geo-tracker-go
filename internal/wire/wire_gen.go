@@ -7,6 +7,7 @@
 package wire
 
 import (
+	"github.com/vitao/geolocation-tracker/internal/infrastructure/cache"
 	"github.com/vitao/geolocation-tracker/internal/infrastructure/database"
 	"github.com/vitao/geolocation-tracker/internal/usecase"
 	"github.com/vitao/geolocation-tracker/pkg/config"
@@ -29,7 +30,12 @@ func InitializeContainer() (*Container, error) {
 	userRepository := database.NewUserRepository(db, loggerLogger)
 	createUserUseCase := usecase.NewCreateUserUseCase(userRepository, loggerLogger)
 	positionRepository := database.NewPositionRepository(db, loggerLogger)
-	saveUserPositionUseCase := usecase.NewSaveUserPositionUseCase(userRepository, positionRepository, loggerLogger)
+	redis, err := cache.NewRedis(configConfig, loggerLogger)
+	if err != nil {
+		return nil, err
+	}
+	publisher := NewRedisEventPublisher(redis, loggerLogger)
+	saveUserPositionUseCase := usecase.NewSaveUserPositionUseCase(userRepository, positionRepository, publisher, loggerLogger)
 	findNearbyUsersUseCase := usecase.NewFindNearbyUsersUseCase(userRepository, positionRepository, loggerLogger)
 	getUsersInSectorUseCase := usecase.NewGetUsersInSectorUseCase(userRepository, positionRepository, loggerLogger)
 	getCurrentPositionUseCase := usecase.NewGetCurrentPositionUseCase(userRepository, positionRepository, loggerLogger)
@@ -50,4 +56,18 @@ func InitializeDatabase() (*database.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// InitializeRedis inicializa apenas o Redis
+func InitializeRedis() (*cache.Redis, error) {
+	configConfig, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	loggerLogger := logger.NewLogger()
+	redis, err := cache.NewRedis(configConfig, loggerLogger)
+	if err != nil {
+		return nil, err
+	}
+	return redis, nil
 }

@@ -117,3 +117,19 @@ func (c *Coordinate) ToWKT() string {
 func degToRad(deg float64) float64 {
 	return deg * (math.Pi / 180)
 }
+
+// CalculateDistance calcula distância entre duas coordenadas em metros
+// Função utilitária para usar sem criar objetos Coordinate
+func CalculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
+	coord1, err := NewCoordinate(lat1, lng1)
+	if err != nil {
+		return 0
+	}
+
+	coord2, err := NewCoordinate(lat2, lng2)
+	if err != nil {
+		return 0
+	}
+
+	return coord1.DistanceTo(coord2)
+}

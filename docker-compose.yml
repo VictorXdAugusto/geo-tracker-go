@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # PostgreSQL com PostGIS para consultas geoespaciais
   postgres:
     image: postgis/postgis:15-3.3
     container_name: geolocation-postgres
@@ -17,7 +16,6 @@ services:
     networks:
       - geolocation-network
 
-  # Redis para cache e streams de eventos
   redis:
     image: redis:7-alpine
     container_name: geolocation-redis
@@ -29,7 +27,6 @@ services:
     networks:
       - geolocation-network
 
-  # Nossa aplicação Go
   app:
     build:
       context: .

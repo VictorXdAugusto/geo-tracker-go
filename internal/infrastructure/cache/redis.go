@@ -180,3 +180,8 @@ func (r *Redis) LogStats() {
 		"stale_conns", stats.StaleConns,
 	)
 }
+
+// Client retorna o cliente Redis para uso em outras partes do sistema
+func (r *Redis) Client() *redis.Client {
+	return r.client
+}

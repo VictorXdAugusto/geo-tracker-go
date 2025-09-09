@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vitao/geolocation-tracker/internal/domain/entity"
+	"github.com/vitao/geolocation-tracker/internal/domain/events"
 	"github.com/vitao/geolocation-tracker/internal/domain/repository"
 	"github.com/vitao/geolocation-tracker/internal/domain/valueobject"
 	"github.com/vitao/geolocation-tracker/pkg/logger"
@@ -29,21 +30,24 @@ type SaveUserPositionResponse struct {
 
 // SaveUserPositionUseCase implementa a lógica de negócio para salvar posições
 type SaveUserPositionUseCase struct {
-	userRepo     repository.UserRepository
-	positionRepo repository.PositionRepository
-	logger       logger.Logger
+	userRepo       repository.UserRepository
+	positionRepo   repository.PositionRepository
+	eventPublisher events.Publisher
+	logger         logger.Logger
 }
 
 // NewSaveUserPositionUseCase cria uma nova instância do use case
 func NewSaveUserPositionUseCase(
 	userRepo repository.UserRepository,
 	positionRepo repository.PositionRepository,
+	eventPublisher events.Publisher,
 	logger logger.Logger,
 ) *SaveUserPositionUseCase {
 	return &SaveUserPositionUseCase{
-		userRepo:     userRepo,
-		positionRepo: positionRepo,
-		logger:       logger,
+		userRepo:       userRepo,
+		positionRepo:   positionRepo,
+		eventPublisher: eventPublisher,
+		logger:         logger,
 	}
 }
 
@@ -103,7 +107,12 @@ func (uc *SaveUserPositionUseCase) Execute(ctx context.Context, req SaveUserPosi
 		return nil, fmt.Errorf("failed to create position: %w", err)
 	}
 
-	// 5. Salvar posição no repositório
+	// 5. Buscar posição anterior para comparação (para eventos)
+	var previousPosition *entity.Position
+	previousPosition, _ = uc.positionRepo.FindCurrentByUserID(ctx, userID)
+	// Não retornamos erro se não encontrar posição anterior (usuário novo)
+
+	// 6. Salvar posição no repositório
 	if err := uc.positionRepo.Save(ctx, position); err != nil {
 		uc.logger.Error("Failed to save position", map[string]interface{}{
 			"position_id": position.ID(),
@@ -113,7 +122,17 @@ func (uc *SaveUserPositionUseCase) Execute(ctx context.Context, req SaveUserPosi
 		return nil, fmt.Errorf("failed to save position: %w", err)
 	}
 
-	// 6. Log de sucesso
+	// 7. Publicar evento de mudança de posição
+	if err := uc.publishPositionChangedEvent(ctx, user, position, previousPosition); err != nil {
+		// Log error mas não falha a operação (evento é secundário)
+		uc.logger.Error("Failed to publish position changed event",
+			"position_id", position.ID(),
+			"user_id", user.ID(),
+			"error", err.Error(),
+		)
+	}
+
+	// 8. Log de sucesso
 	uc.logger.Info("Position saved successfully", map[string]interface{}{
 		"position_id": position.ID(),
 		"user_id":     user.ID(),
@@ -122,11 +141,61 @@ func (uc *SaveUserPositionUseCase) Execute(ctx context.Context, req SaveUserPosi
 		"longitude":   coordinate.Longitude(),
 	})
 
-	// 7. Retornar resposta
+	// 9. Retornar resposta
 	positionIDEntity := position.ID()
 	return &SaveUserPositionResponse{
 		PositionID: positionIDEntity.String(),
 		SectorID:   position.Sector().ID(),
 		Message:    "Position saved successfully",
 	}, nil
+}
+
+// publishPositionChangedEvent publica evento quando posição do usuário muda
+func (uc *SaveUserPositionUseCase) publishPositionChangedEvent(
+	ctx context.Context,
+	user *entity.User,
+	newPosition *entity.Position,
+	previousPosition *entity.Position,
+) error {
+	// Preparar dados do evento
+	var previousLat, previousLng float64
+	var previousSector string
+	var distanceMoved float64
+
+	if previousPosition != nil {
+		previousLat = previousPosition.Coordinate().Latitude()
+		previousLng = previousPosition.Coordinate().Longitude()
+		previousSector = previousPosition.Sector().ID()
+
+		// Calcular distância movida
+		distanceMoved = valueobject.CalculateDistance(
+			previousLat, previousLng,
+			newPosition.Coordinate().Latitude(), newPosition.Coordinate().Longitude(),
+		)
+	}
+
+	// Criar dados do evento
+	positionID := newPosition.ID()
+	userID := user.ID()
+
+	eventData := events.PositionChangedData{
+		PositionID:     positionID.String(),
+		PreviousLat:    previousLat,
+		PreviousLng:    previousLng,
+		NewLat:         newPosition.Coordinate().Latitude(),
+		NewLng:         newPosition.Coordinate().Longitude(),
+		PreviousSector: previousSector,
+		NewSector:      newPosition.Sector().ID(),
+		DistanceMoved:  distanceMoved,
+	}
+
+	// Criar evento
+	event := events.NewPositionChangedEvent(
+		userID.String(),
+		"default-event", // TODO: pegar do contexto do evento
+		eventData,
+	)
+
+	// Publicar evento
+	return uc.eventPublisher.PublishPositionChanged(ctx, event)
 }
