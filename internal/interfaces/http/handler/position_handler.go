@@ -40,7 +40,17 @@ type SavePositionRequest struct {
 }
 
 // SavePosition salva a posição de um usuário
-// POST /api/v1/positions
+// @Summary Salvar posição do usuário
+// @Description Salva uma nova posição geográfica para um usuário específico
+// @Tags positions
+// @Accept json
+// @Produce json
+// @Param request body SavePositionRequest true "Dados da posição"
+// @Success 201 {object} usecase.SaveUserPositionResponse "Posição salva com sucesso"
+// @Failure 400 {object} map[string]interface{} "Dados de posição inválidos"
+// @Failure 404 {object} map[string]interface{} "Usuário não encontrado"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /positions [post]
 func (h *PositionHandler) SavePosition(c *gin.Context) {
 	var req SavePositionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -94,7 +104,20 @@ type FindNearbyRequest struct {
 }
 
 // FindNearbyUsers busca usuários próximos
-// GET /api/v1/positions/nearby?user_id=X&latitude=Y&longitude=Z&radius_meters=R&max_results=N
+// @Summary Buscar usuários próximos
+// @Description Busca usuários próximos a uma coordenada específica dentro de um raio determinado
+// @Tags positions
+// @Accept json
+// @Produce json
+// @Param user_id query string true "ID do usuário que está buscando"
+// @Param latitude query number true "Latitude da posição de referência (-90 a 90)"
+// @Param longitude query number true "Longitude da posição de referência (-180 a 180)"
+// @Param radius_meters query number true "Raio de busca em metros (1 a 50000)"
+// @Param max_results query int false "Número máximo de resultados (padrão: 50)"
+// @Success 200 {object} usecase.FindNearbyUsersResponse "Lista de usuários próximos"
+// @Failure 400 {object} map[string]interface{} "Parâmetros de busca inválidos"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /positions/nearby [get]
 func (h *PositionHandler) FindNearbyUsers(c *gin.Context) {
 	userID := c.Query("user_id")
 	if userID == "" {
@@ -155,7 +178,18 @@ type GetUsersInSectorRequest struct {
 }
 
 // GetUsersInSector busca usuários no mesmo setor
-// GET /api/v1/positions/sector?user_id=X&latitude=Y&longitude=Z
+// @Summary Buscar usuários no mesmo setor
+// @Description Busca todos os usuários que estão no mesmo setor geográfico de uma coordenada específica
+// @Tags positions
+// @Accept json
+// @Produce json
+// @Param user_id query string true "ID do usuário que está buscando"
+// @Param latitude query number true "Latitude da posição de referência (-90 a 90)"
+// @Param longitude query number true "Longitude da posição de referência (-180 a 180)"
+// @Success 200 {object} usecase.GetUsersInSectorResponse "Lista de usuários no setor"
+// @Failure 400 {object} map[string]interface{} "Parâmetros de busca inválidos"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /positions/sector [get]
 func (h *PositionHandler) GetUsersInSector(c *gin.Context) {
 	userID := c.Query("user_id")
 	if userID == "" {

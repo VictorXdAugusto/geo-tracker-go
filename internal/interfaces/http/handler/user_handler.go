@@ -33,7 +33,17 @@ func NewUserHandler(
 }
 
 // CreateUser cria um novo usuário
-// POST /api/v1/users
+// @Summary Criar um novo usuário
+// @Description Cria um novo usuário no sistema para participar de um evento
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body usecase.CreateUserRequest true "Dados do usuário"
+// @Success 201 {object} usecase.CreateUserResponse "Usuário criado com sucesso"
+// @Failure 400 {object} map[string]interface{} "Erro de validação"
+// @Failure 409 {object} map[string]interface{} "Usuário já existe"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /users [post]
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req usecase.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,7 +80,17 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 }
 
 // GetCurrentPosition retorna a posição atual do usuário
-// GET /api/v1/users/:id/position
+// @Summary Obter posição atual do usuário
+// @Description Retorna a posição geográfica atual de um usuário específico
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path string true "ID do usuário"
+// @Success 200 {object} usecase.GetCurrentPositionResponse "Posição atual do usuário"
+// @Failure 400 {object} map[string]interface{} "ID do usuário inválido"
+// @Failure 404 {object} map[string]interface{} "Usuário não encontrado"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /users/{id}/position [get]
 func (h *UserHandler) GetCurrentPosition(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {
@@ -108,7 +128,18 @@ func (h *UserHandler) GetCurrentPosition(c *gin.Context) {
 }
 
 // GetPositionHistory retorna o histórico de posições do usuário
-// GET /api/v1/users/:id/positions/history?limit=N
+// @Summary Obter histórico de posições do usuário
+// @Description Retorna o histórico de posições geográficas de um usuário com limite configurável
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path string true "ID do usuário"
+// @Param limit query int false "Número máximo de posições a retornar (padrão: 10, máximo: 100)"
+// @Success 200 {object} usecase.GetPositionHistoryResponse "Histórico de posições do usuário"
+// @Failure 400 {object} map[string]interface{} "ID do usuário inválido"
+// @Failure 404 {object} map[string]interface{} "Usuário não encontrado"
+// @Failure 500 {object} map[string]interface{} "Erro interno do servidor"
+// @Router /users/{id}/positions/history [get]
 func (h *UserHandler) GetPositionHistory(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {

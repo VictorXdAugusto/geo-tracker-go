@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/vitao/geolocation-tracker/internal/interfaces/http/handler"
 	"github.com/vitao/geolocation-tracker/internal/usecase"
 	"github.com/vitao/geolocation-tracker/pkg/logger"
@@ -41,12 +43,22 @@ func SetupRoutes(
 	})
 
 	// Health check
+	// @Summary Health Check
+	// @Description Verifica se o serviço está funcionando corretamente
+	// @Tags health
+	// @Accept json
+	// @Produce json
+	// @Success 200 {object} map[string]string "Serviço saudável"
+	// @Router /health [get]
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "healthy",
 			"service": "geolocation-tracker",
 		})
 	})
+
+	// Swagger documentation
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Criar handlers
 	userHandler := handler.NewUserHandler(
